@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="Shift_JIS" standalone="yes" ?>
+<package><job id="Anubisizer"><?job error="True" debug="True" ?>
+<script language="VBScript" src="./FFTLIB.vbs"></script>
+<script language="VBScript">
+<![CDATA[
+
+Call Main
+
+Sub Main
+  Set coFFT = New FileFilterToolkit
+  With coFFT
+    Call .GetOptArgs(WScript.Arguments)
+    Call .SetFilter("Grep", .FFT_Grep("ホスト名", "r"))
+    Call .SetFilter("Sort", .FFT_Sort(""))
+    Call .SetFilter("Anubisizer1", New Anubisizer1)
+    Call .SetFilter("Anubisizer2", New Anubisizer2)
+    Call .SetRename("^(.*)(\..*)$","\1_anbz\2")
+    Call .Execute
+    Call .View
+  End With
+End Sub
+
+'中間データ形式作成
+Class Anubisizer1
+  Public FilterName
+  Public FilterType
+  Public prFlds
+  Public lineNum
+
+  'フィルタ初期処理
+  Public Sub Initialize(argFFT)
+    With argFFT
+      FilterName = "Anubisizer1"
+      FilterType = "Line"
+    End With
+  End Sub
+
+  'フィルタ終了処理
+  Public Sub Terminate(argFFT)
+  End Sub
+
+  'ファイルオープン
+  Public Function OpenFile(argFFT, argImpFile, argWrkFile)
+    OpenFile = True
+  End Function
+
+  'ファイルクローズ
+  Public Function CloseFile(argFFT, argImpFile, argWrkFile)
+    CloseFile = True
+  End Function
+
+  '行処理
+  Public Function ProcessLine(argFFT, argLine)
+    With argFFT
+      lineNum = lineNum + 1
+      arFlds = .Split(argLine, ",")
+      argLine = ""
+      If lineNum = 1 Then
+        prFlds = arFlds
+        For i = 0 To Ubound(arFlds)
+          argLine = argLine & Space(i*2) & "- " & arFlds(i)
+          If i < Ubound(arFlds) Then
+            argLine = argLine & vbCrLf
+          End If
+        Next
+      Else
+        For i = 0 To Ubound(arFlds)
+          If prFlds(i) <> arFlds(i) Then
+            For j = i To Ubound(arFlds)
+              argLine = argLine & Space(j*2) & "- " & arFlds(j)
+              If j < Ubound(arFlds) Then
+                argLine = argLine & vbCrLf
+              End If
+            Next
+            Exit For
+          End If
+        Next
+      End If
+      prFlds = arFlds
+      ProcessLine = True
+    End With
+  End Function
+
+End Class
+
+'HTMLテーブル作成
+Class Anubisizer2
+  Public FilterName
+  Public FilterType
+  Public oRoot
+
+  'フィルタ初期処理
+  Public Sub Initialize(argFFT)
+    With argFFT
+      FilterName = "Anubisizer2"
+      FilterType = "Line"
+    End With
+  End Sub
+
+  'フィルタ終了処理
+  Public Sub Terminate(argFFT)
+  End Sub
+
+  'ファイルオープン
+  Public Function OpenFile(argFFT, argImpFile, argWrkFile)
+    OpenFile = True
+    Set oRoot = CreateObject("Scripting.Dictionary")
+  End Function
+
+  'ファイルクローズ
+  Public Function CloseFile(argFFT, argImpFile, argWrkFile)
+    CloseFile = True
+  End Function
+
+  '行処理
+  Public Function ProcessLine(argFFT, argLine)
+    With argFFT
+      nPos = InStr(argLine, "-")
+      nLvl = (nPos - 1) / 2
+      sItm = Mid(argLine,nPos+2,1000)
+      argLine = nLvl & sItm & argLine
+      ProcessLine = True
+    End With
+  End Function
+
+End Class
+
+]]>
+</script>
+</job>
+</package>
