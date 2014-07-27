@@ -9,14 +9,29 @@ Call Main
 Sub Main
   Set coFFT = New FileFilterToolkit
   With coFFT
+    '引数ファイルを.Filesにセット
     Call .GetOptArgs(WScript.Arguments)
+
+    'タイトル行を取り除くフィルタ
     Call .SetFilter("Grep", .FFT_Grep("ホスト名", "r"))
+
+    'データ行をソートするフィルタ
     Call .SetFilter("Sort", .FFT_Sort(""))
+
+    'CSVからYAMLに変換するフィルタ
     Call .SetFilter("Anubisizer1", New Anubisizer1)
+
+    'YAMLからHTMLテーブルを作成するフィルタ
     Call .SetFilter("Anubisizer2", New Anubisizer2)
-    Call .SetRename("^(.*)(\..*)$","\1_anbz\2")
+
+    '出力結果ファイルの拡張子をhtmに置換
+    Call .SetRename("^(.*)(\..*)$","\1_anbz.htm")
+
+    '上記で設定したフィルタ処理を実行
     Call .Execute
-    Call .View
+
+    'ノートパッドで表示
+    'Call .View
   End With
 End Sub
 
@@ -53,29 +68,46 @@ Class Anubisizer1
   Public Function ProcessLine(argFFT, argLine)
     With argFFT
       lineNum = lineNum + 1
+
+      '読み込み行をフィールド配列に分割
       arFlds = .Split(argLine, ",")
+
+      '出力行内容を一旦クリア
       argLine = ""
+
+      '一行目かどうか
       If lineNum = 1 Then
+        '前行フィールド配列を初期セット
         prFlds = arFlds
+        'フィールド配列を１レベルから順に処理
         For i = 0 To Ubound(arFlds)
+          'レベルごとのインデントを付けて出力
           argLine = argLine & Space(i*2) & "- " & arFlds(i)
+          '最終フィールドの行は改行しない ※FW側で勝手に改行が付く為
           If i < Ubound(arFlds) Then
             argLine = argLine & vbCrLf
           End If
         Next
       Else
+      '二行目以降の場合
+        'フィールド配列を１レベルから順に処理
         For i = 0 To Ubound(arFlds)
+          'フィールドが前行と異なっているかチェック
           If prFlds(i) <> arFlds(i) Then
+            '異なっているレベルから残りのフィールドを出力
             For j = i To Ubound(arFlds)
               argLine = argLine & Space(j*2) & "- " & arFlds(j)
+              '最終フィールドの行は改行しない ※FW側で勝手に改行が付く為
               If j < Ubound(arFlds) Then
                 argLine = argLine & vbCrLf
               End If
             Next
+            'チェック用のループを脱出
             Exit For
           End If
         Next
       End If
+      '前行フィールド配列へ退避
       prFlds = arFlds
       ProcessLine = True
     End With
@@ -87,7 +119,10 @@ End Class
 Class Anubisizer2
   Public FilterName
   Public FilterType
-  Public oRoot
+  Public nCurLvl
+  Public arLvlNode()
+  Public HTM
+  Public arLvlSpan()
 
   'フィルタ初期処理
   Public Sub Initialize(argFFT)
@@ -104,21 +139,93 @@ Class Anubisizer2
   'ファイルオープン
   Public Function OpenFile(argFFT, argImpFile, argWrkFile)
     OpenFile = True
-    Set oRoot = CreateObject("Scripting.Dictionary")
+    nCurLvl = 0
+    ReDim Preserve arLvlNode(0)
+    Set arLvlNode(0) = CreateObject("Scripting.Dictionary")
   End Function
 
   'ファイルクローズ
   Public Function CloseFile(argFFT, argImpFile, argWrkFile)
+    '作業ファイルを上書き新規作成、行処理で作成したオブジェクトツリーからHTMLを出力
+    'HTML作成ロジックは kunstさんのを丸パクリ（＾＾； https://gist.github.com/kunst1080/355165735a7b635ad6cc
+    Set HTM = OpenWriteTextFile(argWrkFile)
+    HTM.WriteLine "<html><head><title>Anubisizer2</title></head><boby><table border=1>"
+    HTM.WriteLine "<tr>"
+    Set oRoot = arLvlNode(0)
+    'msgbox oRoot.Count
+    For Each k In oRoot.Keys
+      'msgbox k & ", " & oRoot.Item(k).Count 
+      Call OutputNode(k, oRoot.Item(k))
+    Next
+    HTM.WriteLine "</table></boby></html>"
+    HTM.Close
     CloseFile = True
+  End Function
+
+  'ノード出力用
+  Private Function OutputNode(argKey, argNode)
+    '指定ノードのTDタグを出力
+    HTM.WriteLine "<td rowspan=" & CalcRowSpan(argNode) & ">" & argKey & "</td>"
+    '子ノードが存在するかどうか
+    If argNode.Count > 0 Then
+      '再帰的にTDタグを出力
+      For Each k In argNode.Keys
+        Call OutputNode(k, argNode.Item(k))
+      Next
+    Else
+      '最終レベルのノードまで到達した場合はTR終了・開始タグを出力
+      HTM.WriteLine "</tr><tr>"
+    End If
+  End Function
+
+  'RowSpan計算用
+  Private Function CalcRowSpan(argNode)
+    '指定ノードから再帰的に最終ノードの合計数を算出
+    nRowSpan = 0
+    If argNode.Count > 0 Then
+      For Each k In argNode.Keys
+        nRowSpan = nRowSpan + CalcRowSpan(argNode.Item(k))
+      Next
+    Else
+      nRowSpan = nRowSpan + 1
+    End If
+    CalcRowSpan = nRowSpan
   End Function
 
   '行処理
   Public Function ProcessLine(argFFT, argLine)
     With argFFT
+      'YAML行のレベルと値を取得
       nPos = InStr(argLine, "-")
-      nLvl = (nPos - 1) / 2
+      nLvl = (nPos - 1) / 2 + 1
       sItm = Mid(argLine,nPos+2,1000)
       argLine = nLvl & sItm & argLine
+
+      'レベルのUP/DOWN/同レベルのままか
+      If nCurLvl < nLvl Then
+        '現レベルを変更
+        nCurLvl = nLvl
+        '親ノードに自分を追加
+        Set oNode = CreateObject("Scripting.Dictionary")
+        Call arLvlNode(nCurLvl - 1).Add(sItm, oNode)
+        'レベル配列拡張して、現レベルのノードへ自分をセット
+        ReDim Preserve arLvlNode(nCurLvl)
+        Set arLvlNode(nCurLvl) = oNode
+      ElseIf nCurLvl > nLvl Then
+        '現レベルを変更
+        nCurLvl = nLvl
+        '親ノードに自分を追加
+        Set oNode = CreateObject("Scripting.Dictionary")
+        Call arLvlNode(nCurLvl - 1).Add(sItm, oNode)
+        '現レベルのノードへ自分をセット
+        Set arLvlNode(nCurLvl) = oNode
+      Else
+        '親ノードに自分を追加
+        Set oNode = CreateObject("Scripting.Dictionary")
+        Call arLvlNode(nCurLvl - 1).Add(sItm, oNode)
+        '現レベルのノードへ自分をセット
+        Set arLvlNode(nCurLvl) = oNode
+      End If
       ProcessLine = True
     End With
   End Function
